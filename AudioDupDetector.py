@@ -89,9 +89,9 @@ class subFile(audioFile):
         if fp is not None:
             self.fp = fp
         else:
-            print("Attempted to get fingerprint for file: ")
-            print(self.path)
-            print("Failed, now trying to create clip from scratch... ")
+            dprint("Attempted to get fingerprint for file: ")
+            dprint(self.path)
+            dprint("Failed, now trying to create clip from scratch... ")
             self.fp = self.getClip()
         self.duration, self.fingerprint = self.fp[0], self.fp[1]
     def getClip(self):
@@ -116,8 +116,8 @@ class subFile(audioFile):
         ]
         dprint(" ".join(cmd), 1)
         subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        print("Adding fingerprint for file: ")
-        print(self.path)
+        dprint("Adding fingerprint for file: ")
+        dprint(self.path)
         fp = addFpFromFile(self.path)
         os.remove(self.path)
         return fp
