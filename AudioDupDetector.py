@@ -10,8 +10,6 @@ from json import dumps, loads
 #TO-DO LIST:
 # Make a "database" of ads for comparison; include last-detected timestamp. 
 
-RUN_ON_STARTUP = True
-WAIT_TIME = 360
 EXTRAP_REMOVED_CONTENT = True #Not yet implemented
 #Comparison timing info 
 CMPR_DURATION = 10
@@ -420,59 +418,12 @@ def main():
             if not os.path.exists(output):
                 removeClips(path, output, timestamps)
         fp_db.commit()
+    fp_db.close()
 
 def dprint(print_str: str, indents: int=0):
     indent = "    "*indents + "- " if indents != 0 else ""
     if __debug__: print(f"{indent}{print_str}")
 
-def filesChanged(directory=INPUT_DIR): 
-    #Simple, way to prevent running unless a new file is present
-    all_files = []
-    def walk(dir):
-        for entry in os.listdir(dir):
-            full_path = os.path.join(dir, entry)
-            #If it's a directory, recurse
-            if os.path.isdir(full_path): walk(full_path)
-            #If it's an mp3 file, add it
-            elif full_path.lower().endswith(".mp3"): all_files.append(full_path)
-    walk(directory)
-    all_files.sort()
-    all_files_str = "\n".join(all_files)
-    text_file = os.path.join(directory, "file_list.txt")
-    if not os.path.exists(text_file) or open(text_file, "r").read() != all_files_str: 
-        with open(text_file, "w") as f:
-            f.write(all_files_str)
-        return True
-    return False
-
-def loop():
-    print("Starting main loop. ")
-    global RUN_ON_STARTUP
-    failures = 0
-    while True:
-        if filesChanged() or RUN_ON_STARTUP: 
-            try: main()
-            #cardinal python sins to follow:
-            except KeyboardInterrupt:
-                print("Keyboard interrupt detected. Exiting...")
-                import sys
-                sys.exit(0)
-            except SystemExit:
-                import sys
-                sys.exit(0)
-            except:
-                import traceback
-                traceback.print_exc()
-                failures += 1
-                if failures == 3: break
-        RUN_ON_STARTUP = False
-        print(f"Now sleeping until new files are detected...")
-        sleep(WAIT_TIME)
-
 if __name__ == '__main__':
     ensureDatabase()
-    loop()
-    fp_db.close()
-    print(f"3 consecutive failures detected. Erasing database and rebooting container. ")
-    os.remove(DB)
-    raise
+    main()
