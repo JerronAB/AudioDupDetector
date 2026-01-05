@@ -420,7 +420,6 @@ def main():
             if not os.path.exists(output):
                 removeClips(path, output, timestamps)
         fp_db.commit()
-    fp_db.close()
 
 def dprint(print_str: str, indents: int=0):
     indent = "    "*indents + "- " if indents != 0 else ""
@@ -473,6 +472,7 @@ def loop():
 if __name__ == '__main__':
     ensureDatabase()
     loop()
+    fp_db.close()
     print(f"3 consecutive failures detected. Erasing database and rebooting container. ")
     os.remove(DB)
     raise
