@@ -22,6 +22,7 @@ ENV PYTHONUNBUFFERED=1
 
 # Copy application files
 COPY AudioDupDetector.py .
+COPY main.sh .
 
 # Sets the default command to run your Python script
-ENTRYPOINT ["python", "-OO", "AudioDupDetector.py"]
+ENTRYPOINT ["/usr/bin/env", "bash", "/app/main.sh"]
