@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail #"strict mode"
 
+ffmpeg -version
+
 WATCH_DIR="/app/assets"
 WAIT_TIME=10
 MAX_FAILURES=3

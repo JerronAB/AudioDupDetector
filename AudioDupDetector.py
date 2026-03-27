@@ -1,7 +1,5 @@
 from acoustid import fingerprint_file, compare_fingerprints
 from itertools import combinations
-from dataclasses import dataclass, field
-from time import sleep
 import os, subprocess
 import sqlite3
 import random
@@ -205,7 +203,7 @@ def getFiles(directory=INPUT_DIR) -> list[str]:
     walk(directory)
     return mp3_files
 
-def getExpandedClips(f1: audioFile, f2: audioFile):
+def getExpandedClips(f1: subFile, f2: subFile):
     p1 = f1.parent_path
     st1 = f1.start_time
     et1 = f1.end_time
