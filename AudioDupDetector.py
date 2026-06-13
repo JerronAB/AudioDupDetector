@@ -360,7 +360,10 @@ def removeClips(input_path: str, output_path: str, timestamps: list, includeCuts
                 merged.append(current)
         return merged
     timestamps = mergeIntervals(timestamps)
-    bt_strings = [f'between(t\\,{start}\\,{end})' for start, end in timestamps]
+    #max() here is a quickfix for the fact that sometimes 
+    #timestamps go negative because of the way acoustid 
+    #calculates fingerprints and similarity
+    bt_strings = [f'between(t\\,{max(start,0)}\\,{end})' for start, end in timestamps]
     bt_string = '+'.join(bt_strings)
     filter_expr = f"aselect=not({bt_string})"
     cmd = [
