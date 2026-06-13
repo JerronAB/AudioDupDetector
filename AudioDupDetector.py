@@ -345,6 +345,21 @@ def removeClips(input_path: str, output_path: str, timestamps: list, includeCuts
     assert type(timestamps) is list
     for s in timestamps: assert type(s) is tuple
     output_path = output_path.replace("’","")
+    def mergeIntervals(intervals):
+        #Sort timestamps by start time
+        intervals.sort(key=lambda x: x[0])
+        merged = [intervals[0]]
+        for current in intervals[1:]:
+            last_start, last_end = merged[-1]
+            curr_start, curr_end = current
+            if curr_start <= last_end:
+                #Overlap found; update the end of the last tuple
+                merged[-1] = (last_start, max(last_end, curr_end))
+            else:
+                #No overlap; add the new tuple
+                merged.append(current)
+        return merged
+    timestamps = mergeIntervals(timestamps)
     bt_strings = [f'between(t\\,{start}\\,{end})' for start, end in timestamps]
     bt_string = '+'.join(bt_strings)
     filter_expr = f"aselect=not({bt_string})"
@@ -355,7 +370,9 @@ def removeClips(input_path: str, output_path: str, timestamps: list, includeCuts
         output_path
     ]
     print(" ".join(cmd))
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print(res.stdout)
+    print(res.stderr)
     if includeCuts:
         output_path = output_path.replace(".mp3", " ADS.mp3")
         bt_strings = [f'between(t\\,{start}\\,{end})' for start, end in timestamps]
