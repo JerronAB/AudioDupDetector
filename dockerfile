@@ -17,12 +17,15 @@ RUN apt-get update && \
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir pyacoustid
 
+#RUN pip install --no-cache-dir openai-whisper
+
+#RUN pip install --no-cache-dir nltk
+
 #Forces logs to appear immediately
 ENV PYTHONUNBUFFERED=1
 
 # Copy application files
-COPY AudioDupDetector.py .
-COPY main.sh .
+COPY * .
 
 # Sets the default command to run your Python script
 ENTRYPOINT ["/usr/bin/env", "bash", "/app/main.sh"]

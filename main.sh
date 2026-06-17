@@ -13,7 +13,7 @@ DB="/app/assets/fingerprints.db"
 #like this in Bash
 run_python() {
     echo "Starting Python script..."
-    if python -OO AudioDupDetector.py; then
+    if python AudioAdRemover.py; then
         FAILURES=0
         echo "Python completed successfully"
     else
