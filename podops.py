@@ -1,17 +1,36 @@
 from acoustid import fingerprint_file, compare_fingerprints
 from random import shuffle
 from pathlib import Path
-from itertools import combinations
+from itertools import combinations, product
 from podDB import selectComparison, selectFingerprint, insertFingerprint, insertComparison
 #NOTE: I need to make sure I'm inserting comparisons and fps into the db where I should
 #ADDITIONALLY I want to implement separate select funcs for comapisons and fps
 from ffmpeg import createSnippetFile, deleteSnippetFile
+import concurrent.futures
 
 CMPR_DELTA = 5
 CMPR_DURATION = 10
 MIN_SIM_THRESHOLD = 0.5
 
-#May want this to just be a dataclass
+### Worker Functions for Concurrency
+def generateSnippetWorker(file, st, et):
+    """Executes ffmpeg processing; meant for ThreadPoolExecutor."""
+    snippet_fp, fname = createSnippetFile(file, st, et)
+    return st, et, snippet_fp, fname
+
+def compareFingerprintsWorker(args):
+    """Executes math comparisons; meant for ProcessPoolExecutor."""
+    s1_fp, s1_ts, s2_fp, s2_ts = args
+    try:
+        similarity = compare_fingerprints(s1_fp, s2_fp)
+        if similarity > MIN_SIM_THRESHOLD:
+            return similarity, s1_ts[0], s1_ts[1], s2_ts[0], s2_ts[1]
+    except Exception:
+        pass
+    return None
+
+### Storage Classes:
+
 class podcast():
     def __init__(self, pod_dir: Path):
         self.name = pod_dir.name
@@ -24,6 +43,8 @@ class podcast():
         self.episode_pairs = [p for p in combinations(self.episodes, 2)]
     def __hash__(self):
         return hash(self.name)
+    def __repr__(self):
+        return self.name
 
 class episode():
     def __init__(self, ep_input_folder: Path):
@@ -63,6 +84,8 @@ class episode():
         self.duration_, _ = fingerprint_file(self.audio_file.absolute())
         return self.duration_
 
+### Primary Functions
+
 def findDuplicateAudio(db_cursor, f1: episode, f2: episode):
     #Test if these have already been compared:
     cmpr_list = [f1, f2]
@@ -90,9 +113,11 @@ def compareAllSubfiles(db_cursor, f1: episode, f2: episode) -> dict[podcast, lis
     # (check episode object first, then DB, then ffmpeg if necessary)
     #and compare fingerprints from there
     print(f"Now comparing subfiles {f1.name} -> {f2.name}...")
+    # Subfile snippet generation:
     for file in (f1, f2):
         print(f"Getting subfiles for file: {file.name}")
         if file.subfile_fps: continue
+        generation_tasks = []
         current_time = 0
         while current_time + CMPR_DELTA <= file.duration():
             #may be causing issues by not cutting et to 
@@ -102,14 +127,37 @@ def compareAllSubfiles(db_cursor, f1: episode, f2: episode) -> dict[podcast, lis
             et = current_time + CMPR_DURATION if current_time < file.duration_ else file.duration_
             snippet_id = f"{file.abs_path}_snippet_{st}:{et}.mp3"
             snippet_fp = selectFingerprint(db_cursor,snippet_id)
-            if not snippet_fp:
-                snippet_fp, fname = createSnippetFile(file, st, et)
-                insertFingerprint(db_cursor, snippet_id, snippet_fp)
-                deleteSnippetFile(fname)
-            file.subfile_ids.append(snippet_id)
-            file.subfile_fps.append(snippet_fp)
-            file.subfile_times.append((st, et))
+            if snippet_fp:
+                file.subfile_ids.append(snippet_id)
+                file.subfile_fps.append(snippet_fp)
+                file.subfile_times.append((st, et))
+            else:
+                generation_tasks.append((file, st, et))
             current_time += CMPR_DELTA
+        
+        # Generate missing files via ThreadPool
+        if generation_tasks:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [executor.submit(generateSnippetWorker, task[0], task[1], task[2]) for task in generation_tasks]
+                
+                for future in concurrent.futures.as_completed(futures):
+                    st, et, snippet_fp, fname = future.result()
+                    snippet_id = f"{file.abs_path}_snippet_{st}:{et}.mp3"
+                    
+                    # SQLite insertions strictly sequential on main thread
+                    insertFingerprint(db_cursor, snippet_id, snippet_fp)
+                    deleteSnippetFile(fname)
+                    
+                    file.subfile_ids.append(snippet_id)
+                    file.subfile_fps.append(snippet_fp)
+                    file.subfile_times.append((st, et))
+            
+            # Sort arrays chronologically since threading returns unordered results
+            if file.subfile_times:
+                zipped = sorted(zip(file.subfile_times, file.subfile_ids, file.subfile_fps), key=lambda x: x[0][0])
+                file.subfile_times = [x[0] for x in zipped]
+                file.subfile_ids   = [x[1] for x in zipped]
+                file.subfile_fps   = [x[2] for x in zipped]
     #Now f1 and f2 both have fingerprints
     #Storing results in DB is NOT necessary here
     i = 0
@@ -122,6 +170,26 @@ def compareAllSubfiles(db_cursor, f1: episode, f2: episode) -> dict[podcast, lis
                 s1_start, s1_end = s1_ts
                 s2_start, s2_end = s2_ts
                 s1_start, s1_end, s2_start, s2_end = getExpandedClips(db_cursor, f1, f2, similarity, s1_start, s1_end, s2_start, s2_end)
+                f1.addDuplicateTimestamps([(s1_start, s1_end)])
+                f2.addDuplicateTimestamps([(s2_start, s2_end)])
+    
+    # Multiprocessing for fingerprint math
+    comparison_tasks = []
+    for (s1_fp, s1_ts), (s2_fp, s2_ts) in product(
+        zip(f1.subfile_fps, f1.subfile_times),
+        zip(f2.subfile_fps, f2.subfile_times)
+    ):
+        comparison_tasks.append((s1_fp, s1_ts, s2_fp, s2_ts))
+
+    print(f"Executing {len(comparison_tasks)} subfile comparisons...")
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        for result in executor.map(compareFingerprintsWorker, comparison_tasks):
+            if result:
+                similarity, s1_start, s1_end, s2_start, s2_end = result
+                # Expansion requires state management and SQLite ops; kept synchronous
+                s1_start, s1_end, s2_start, s2_end = getExpandedClips(
+                    db_cursor, f1, f2, similarity, s1_start, s1_end, s2_start, s2_end
+                )
                 f1.addDuplicateTimestamps([(s1_start, s1_end)])
                 f2.addDuplicateTimestamps([(s2_start, s2_end)])
     print(f"Finished comparing {f1.name} to {f2.name}...")
