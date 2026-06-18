@@ -153,7 +153,7 @@ def getExpandedClips(
             f2_fp = selectFingerprint(db_cursor,snippet_id)
             if not f2_fp:
                 f2_fp, fname = createSnippetFile(f2,new_s2_st,s2_et_)
-                insertFingerprint(db_cursor, snippet_id, f1_fp)
+                insertFingerprint(db_cursor, snippet_id, f2_fp)
                 deleteSnippetFile(fname)
             try: new_similarity = compare_fingerprints(f1_fp, f2_fp)
             except: new_similarity = 0
@@ -208,7 +208,7 @@ def getExpandedClips(
             if not f2_fp:
                 f2_fp, fname = createSnippetFile(f2, s2_st_, new_s2_et)
                 insertFingerprint(db_cursor, snippet_id, f2_fp)
-                deleteSnippetFile(f2)
+                deleteSnippetFile(fname)
             try: new_similarity = compare_fingerprints(f1_fp, f2_fp)
             except: new_similarity = 0
             similarity_increased = (new_similarity > curr_similarity)
