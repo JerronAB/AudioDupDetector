@@ -4,7 +4,7 @@ from pathlib import Path
 from itertools import combinations, product
 from podDB import selectComparison, selectFingerprint, insertFingerprint, insertComparison
 #NOTE: I need to make sure I'm inserting comparisons and fps into the db where I should
-#ADDITIONALLY I want to implement separate select funcs for comapisons and fps
+#ADDITIONALLY I want to implement separate select funcs for comparisons and fps
 from ffmpeg import createSnippetFile, deleteSnippetFile
 import concurrent.futures
 
@@ -39,7 +39,7 @@ class podcast():
             for f in pod_dir.iterdir() 
             if f.is_dir()
         ]
-        self.episodes = [episode(f) for f in self.episode_folders]
+        self.episodes = [episode(f) for f in self.episode_folders if episode(f).audio_file is not None]
         self.episode_pairs = [p for p in combinations(self.episodes, 2)]
     def __hash__(self):
         return hash(self.name)
@@ -50,17 +50,22 @@ class episode():
     def __init__(self, ep_input_folder: Path):
         self.name = ep_input_folder.name
         self.abs_path = str(ep_input_folder.absolute())
-        self.audio_file = next(ep_input_folder.glob("*.mp3"))
+        self.audio_file = next(ep_input_folder.glob("*.mp3"), None)
         self.duplicate_timestamps = []
         self.subfile_ids = []
         self.subfile_fps = []
         self.subfile_durs = []
         self.subfile_times = []
         self.duration_ = None
+        self.output_path = ""
     def __hash__(self):
         return hash(self.abs_path)
     def __repr__(self):
         return self.name
+    def exists(self, output_dir):
+        podname = Path(self.abs_path).parent
+        self.output_path = str(output_dir/podname.name/self.name) + '.mp3'
+        return Path(self.output_path).exists()
     def addDuplicateTimestamps(self, timestamp_pairs: list):
         assert isinstance(timestamp_pairs, list)
         assert all([len(t) == 2 for t in timestamp_pairs])
@@ -68,7 +73,8 @@ class episode():
     def cleanTimestamps(self):
         #Sort timestamps by start time
         self.duplicate_timestamps.sort(key=lambda x: x[0])
-        merged = [self.duplicate_timestamps[0]]
+        try: merged = [self.duplicate_timestamps[0]]
+        except: return
         for current in self.duplicate_timestamps[1:]:
             last_start, last_end = merged[-1]
             curr_start, curr_end = current
@@ -93,7 +99,7 @@ def findDuplicateAudio(db_cursor, f1: episode, f2: episode):
     cmpr_key = "->".join([c.abs_path for c in cmpr_list])
     print(f"Primary key for comparison: {cmpr_key}")
     timestamps_1, timestamps_2 = selectComparison(db_cursor, cmpr_key)
-    if timestamps_1:
+    if timestamps_1 is not None:
         #timestamps were inserted in sorted order
         print(f"Results from db: {timestamps_1} {timestamps_2}")
         cmpr_list[0].addDuplicateTimestamps(timestamps_1)
@@ -160,19 +166,6 @@ def compareAllSubfiles(db_cursor, f1: episode, f2: episode) -> dict[podcast, lis
                 file.subfile_fps   = [x[2] for x in zipped]
     #Now f1 and f2 both have fingerprints
     #Storing results in DB is NOT necessary here
-    i = 0
-    for s1_id, s1_fp, s1_ts in zip(f1.subfile_ids,f1.subfile_fps,f1.subfile_times):
-        if (i % 100) == 0: print(f"Comparing {f1.name} subfile {i}/{len(f1.subfile_ids)} to all subfiles from {f2.name}...")
-        i += 1
-        for s2_id, s2_fp, s2_ts in zip(f2.subfile_ids,f2.subfile_fps,f2.subfile_times):
-            similarity = compare_fingerprints(s1_fp,s2_fp)
-            if similarity > MIN_SIM_THRESHOLD:
-                s1_start, s1_end = s1_ts
-                s2_start, s2_end = s2_ts
-                s1_start, s1_end, s2_start, s2_end = getExpandedClips(db_cursor, f1, f2, similarity, s1_start, s1_end, s2_start, s2_end)
-                f1.addDuplicateTimestamps([(s1_start, s1_end)])
-                f2.addDuplicateTimestamps([(s2_start, s2_end)])
-    
     # Multiprocessing for fingerprint math
     comparison_tasks = []
     for (s1_fp, s1_ts), (s2_fp, s2_ts) in product(
@@ -261,7 +254,7 @@ def getExpandedClips(
     def expandClipsLeftRight(s1_st_, s2_st_, s1_et_, s2_et_, curr_similarity):
         similarity_increased = True
         while similarity_increased and s1_st_ >= 0 and s2_et_ <= f2.duration_:
-            print(f'Expanding clips left-and-right...',end=" ")
+            print(f'Expanding clips "left-and-right"...',end=" ")
             new_s1_st = s1_st_ - CMPR_DELTA
             new_s2_et = s2_et_ + CMPR_DELTA
             assert (s1_et_ - new_s1_st) == (new_s2_et - s2_st_)
@@ -318,15 +311,10 @@ def getExpandedClips(
     s1_et, s2_st, curr_similarity = expandClipsRightLeft(s1_st, s2_st, s1_et, s2_et, curr_similarity)
     return (s1_st, s1_et, s2_st, s2_et)
 
-def getPodcasts(input_dir: Path, output_dir: Path) -> list[podcast]:
+def getPodcasts(input_dir: Path, output_dir: Path, include_completed=False) -> list[podcast]:
     def podcastNeedsProcessed(p: podcast):
-        podcast_name = p.name.replace("'","")
-        folders = p.episode_folders
-        for ep in folders:
-            if not ep.is_dir(): continue
-            #Create the expected mp3 path
-            expected_filename = output_dir / podcast_name / f"{ep.name}.mp3"
-            if not expected_filename.exists(): return True
+        for ep in p.episodes:
+            if not ep.exists(output_dir): return True
         return False
     podcast_list = [
         podcast(f)

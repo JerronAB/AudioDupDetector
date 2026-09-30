@@ -4,7 +4,7 @@ from acoustid import fingerprint_file
 import subprocess
 from pathlib import Path
 ROOT = Path.cwd()
-TEMP_DIR = Path('/dev/shm/')/'temp'
+TEMP_DIR = ROOT/'temp'
 
 #Trick from stackoverflow:
 # You still need to import the module for the static type checker,
@@ -39,7 +39,6 @@ def deleteSnippetFile(filename: str):
 def removeClips(input_path: str, timestamps: list, output_path: str):
     for s in timestamps: assert type(s) is tuple
     assert isinstance(output_path, str)
-    output_path = output_path.replace("’","")
     #ensure directory for podcast exists:
     outfile = Path(output_path)
     outfile.parent.mkdir(parents=True,exist_ok=True)
@@ -52,12 +51,19 @@ def removeClips(input_path: str, timestamps: list, output_path: str):
     bt_strings = [f'between(t\\,{max(start,0)}\\,{end})' for start, end in timestamps]
     bt_string = '+'.join(bt_strings)
     filter_expr = f"aselect=not({bt_string})"
-    cmd = [
-        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-        '-i', input_path,
-        '-af', filter_expr, 
-        output_path
-    ]
+    if len(bt_strings) > 0:
+        cmd = [
+            'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+            '-i', input_path,
+            '-af', filter_expr, 
+            output_path
+        ]
+    else:
+        cmd = [
+            'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+            '-i', input_path,
+            output_path
+        ]
     print(" ".join(cmd))
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     print(res.stdout)
@@ -76,4 +82,3 @@ def removeClips(input_path: str, timestamps: list, output_path: str):
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     print(res.stdout)
     print(res.stderr)
-    
